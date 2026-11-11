@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shree Mart – Budget Forecast Dashboard</title>
+<style>
+:root{--bg:#f6f8f6;--card:#fff;--ink:#1d2b24;--mut:#5f6f66;--line:#d9e2dc;--g:#1f5c45;--gl:#cfe5d9;--o:#d9822b;--shade:#cfe5d9}
+@media(prefers-color-scheme:dark){:root{--bg:#121a16;--card:#1a2520;--ink:#e6efe9;--mut:#9fb1a6;--line:#2d3b34;--g:#5cc19a;--gl:#24423a;--o:#f0a24f;--shade:#24423a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 Georgia,"Times New Roman",serif}
+.wrap{max-width:1040px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:24px;margin:0 0 2px;color:var(--g)}
+.sub{color:var(--mut);font:13px system-ui,sans-serif;margin-bottom:16px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px;font-family:system-ui,sans-serif}
+.controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
+label{display:block;font-size:13px;color:var(--mut);margin-bottom:4px}
+label b{color:var(--ink);float:right}
+select,input[type=range]{width:100%}
+select{padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)}
+input[type=range]{accent-color:var(--g)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.k{border-left:3px solid var(--g);padding:4px 10px}
+.k span{display:block;font-size:12px;color:var(--mut)}
+.k strong{font:600 20px Georgia,serif}
+h2{font-size:16px;margin:0 0 8px;color:var(--g)}
+svg{width:100%;height:auto;display:block}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px;min-width:480px}
+th,td{padding:5px 8px;text-align:right;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left}
+th{background:var(--gl);color:var(--ink)}
+tfoot td{font-weight:700}
+button{background:var(--g);color:#fff;border:0;border-radius:6px;padding:7px 12px;cursor:pointer;font:13px system-ui}
+.note{font-size:12px;color:var(--mut);margin-top:8px}
+.leg{font-size:12px;color:var(--mut);display:flex;gap:14px;flex-wrap:wrap;margin-top:4px}
+.leg i{display:inline-block;width:12px;height:3px;margin-right:5px;vertical-align:middle}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Shree Mart – budget forecast dashboard</h1>
+<div class="sub">Managerial Accounting WAI · Aman Yadav · simulated data, Nov 2025–Oct 2026 · forecasts start Nov 2026</div>
+
+<div class="panel controls">
+ <div><label>Forecast method</label>
+  <select id="method"><option value="both">Compare both</option><option value="trad">Traditional (3-month moving average)</option><option value="ai">AI-assisted (regression trend)</option></select></div>
+ <div><label>Horizon (months) <b id="vH"></b></label><input type="range" id="horizon" min="3" max="12" step="1" value="12"></div>
+ <div><label>COGS ratio (% of sales) <b id="vC"></b></label><input type="range" id="cogs" min="68" max="82" step="0.5" value="75"></div>
+ <div><label>Fixed costs per month (₹) <b id="vF"></b></label><input type="range" id="fixed" min="60000" max="100000" step="500" value="78500"></div>
+ <div><label>Sales shock (%) <b id="vS"></b></label><input type="range" id="shock" min="-20" max="20" step="1" value="0"></div>
+ <div style="align-self:end"><button id="reset">Reset to report values</button></div>
+</div>
+
+<div class="panel"><h2>Key results for the selected horizon</h2><div class="kpis" id="kpis"></div></div>
+
+<div class="panel"><h2>Monthly sales: actual and forecast</h2><svg id="chart" viewBox="0 0 900 320" role="img" aria-label="Sales chart"></svg>
+ <div class="leg" id="leg"></div></div>
+
+<div class="panel"><h2>Month-by-month budget</h2><div class="tw"><table id="tbl"></table></div>
+ <div class="note">Operating profit = (1 − COGS% − 2.9% other variable costs) × sales − fixed costs. It excludes interest, tax and depreciation and is not cash flow. The 95% band uses the regression standard error (s = ₹21,766, 10 d.f.). The sales shock multiplies forecast sales only. Data are simulated for academic analysis.</div></div>
+</div>
+
+<script>
+const H=[500000,530000,480000,470000,510000,520000,540000,500000,510000,530000,520000,560000];
+const MON=["Nov-25","Dec-25","Jan-26","Feb-26","Mar-26","Apr-26","May-26","Jun-26","Jul-26","Aug-26","Sep-26","Oct-26","Nov-26","Dec-26","Jan-27","Feb-27","Mar-27","Apr-27","May-27","Jun-27","Jul-27","Aug-27","Sep-27","Oct-27"];
+const OTHER=0.029, S=21766, TC=2.228, N=12;
+const $=id=>document.getElementById(id);
+const inr=v=>"₹"+Math.round(v).toLocaleString("en-IN");
+const lakh=v=>"₹"+(v/1e5).toFixed(2)+" lakh";
+// regression
+const xb=6.5, ybar=H.reduce((a,b)=>a+b)/N;
+let sxx=0,sxy=0;H.forEach((y,i)=>{sxx+=(i+1-xb)**2;sxy+=(i+1-xb)*(y-ybar)});
+const b1=sxy/sxx,b0=ybar-b1*xb;
+// forecasts (base, before shock)
+const trad=[],ai=[],lo=[],hi=[];
+{const a=H.slice();for(let i=0;i<12;i++){const f=(a[a.length-1]+a[a.length-2]+a[a.length-3])/3;a.push(f);trad.push(f)}}
+for(let t=13;t<=24;t++){const f=b0+b1*t,se=S*Math.sqrt(1+1/N+(t-xb)**2/sxx);ai.push(f);lo.push(f-TC*se);hi.push(f+TC*se)}
+
+const ctl={method:$("method"),horizon:$("horizon"),cogs:$("cogs"),fixed:$("fixed"),shock:$("shock")};
+Object.values(ctl).forEach(e=>e.addEventListener("input",render));
+$("reset").onclick=()=>{ctl.method.value="both";ctl.horizon.value=12;ctl.cogs.value=75;ctl.fixed.value=78500;ctl.shock.value=0;render()};
+
+function render(){
+ const m=ctl.method.value,h=+ctl.horizon.value,c=+ctl.cogs.value/100,F=+ctl.fixed.value,sh=1+(+ctl.shock.value)/100;
+ $("vH").textContent=h;$("vC").textContent=ctl.cogs.value+"%";$("vF").textContent=inr(F);$("vS").textContent=(ctl.shock.value>0?"+":"")+ctl.shock.value+"%";
+ const cm=1-c-OTHER, be=F/cm;
+ const sets=[];
+ if(m!=="ai")sets.push({k:"trad",name:"Traditional (MA + CVP)",col:"var(--o)",s:trad.slice(0,h).map(v=>v*sh)});
+ if(m!=="trad")sets.push({k:"ai",name:"AI-assisted (regression + CVP)",col:"var(--g)",s:ai.slice(0,h).map(v=>v*sh)});
+ // base-year
+ const baseS=H.reduce((a,b)=>a+b),baseP=cm*baseS-F*12;
+ // KPIs
+ let k="";
+ k+=`<div class="k"><span>Break-even sales / month</span><strong>${inr(be)}</strong></div>`;
+ k+=`<div class="k"><span>Contribution margin ratio</span><strong>${(cm*100).toFixed(1)}%</strong></div>`;
+ sets.forEach(x=>{
+  const tot=x.s.reduce((a,b)=>a+b),prof=cm*tot-F*h,avg=tot/h,mos=(avg-be)/avg,dol=prof>0?cm*tot/prof:NaN;
+  const tag=sets.length>1?(x.k==="ai"?" (AI)":" (Trad.)"):"";
+  k+=`<div class="k"><span>Sales, ${h} months${tag}</span><strong>${lakh(tot)}</strong></div>`;
+  k+=`<div class="k"><span>Operating profit${tag}</span><strong>${lakh(prof)}</strong></div>`;
+  k+=`<div class="k"><span>Operating margin${tag}</span><strong>${(prof/tot*100).toFixed(2)}%</strong></div>`;
+  k+=`<div class="k"><span>Margin of safety${tag}</span><strong>${(mos*100).toFixed(1)}%</strong></div>`;
+  k+=`<div class="k"><span>Operating leverage${tag}</span><strong>${isNaN(dol)?"n/a":dol.toFixed(2)+"×"}</strong></div>`;
+ });
+ k+=`<div class="k"><span>Base year (12 months, same costs)</span><strong>${lakh(baseP)} profit</strong></div>`;
+ $("kpis").innerHTML=k;
+ // chart
+ const W=900,Ht=320,L=60,R=15,T=15,B=45,n=12+h;
+ let ymin=4.2e5,ymax=6.8e5;
+ const all=[...H];sets.forEach(x=>all.push(...x.s));
+ if(m!=="trad")hi.slice(0,h).forEach(v=>all.push(v*sh));
+ ymax=Math.max(ymax,Math.max(...all)*1.03);ymin=Math.min(ymin,Math.min(...all,...lo.slice(0,h).map(v=>v*sh))*0.97);
+ const X=i=>L+(W-L-R)*i/(n-1),Y=v=>T+(Ht-T-B)*(1-(v-ymin)/(ymax-ymin));
+ let s="";
+ for(let g=0;g<=4;g++){const v=ymin+(ymax-ymin)*g/4,y=Y(v);s+=`<line x1="${L}" x2="${W-R}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="${L-6}" y="${y+4}" text-anchor="end" font-size="11" fill="var(--mut)">${(v/1e5).toFixed(1)}</text>`}
+ s+=`<text x="12" y="${Ht/2}" font-size="11" fill="var(--mut)" transform="rotate(-90 12 ${Ht/2})" text-anchor="middle">Sales (₹ lakh)</text>`;
+ s+=`<line x1="${X(11.5)}" x2="${X(11.5)}" y1="${T}" y2="${Ht-B}" stroke="var(--mut)" stroke-dasharray="4 4"/><text x="${X(11.5)+5}" y="${T+10}" font-size="11" fill="var(--mut)">forecast →</text>`;
+ if(m!=="trad"){let p="";for(let i=0;i<h;i++)p+=`${i?"L":"M"}${X(12+i)},${Y(hi[i]*sh)}`;for(let i=h-1;i>=0;i--)p+=`L${X(12+i)},${Y(lo[i]*sh)}`;s+=`<path d="${p}Z" fill="var(--shade)" opacity=".7"/>`}
+ s+=`<path d="${H.map((v,i)=>`${i?"L":"M"}${X(i)},${Y(v)}`).join("")}" fill="none" stroke="var(--ink)" stroke-width="2"/>`;
+ H.forEach((v,i)=>s+=`<circle cx="${X(i)}" cy="${Y(v)}" r="3" fill="var(--ink)"><title>${MON[i]}: ${inr(v)}</title></circle>`);
+ sets.forEach(x=>{s+=`<path d="${x.s.map((v,i)=>`${i?"L":"M"}${X(12+i)},${Y(v)}`).join("")}" fill="none" stroke="${x.col}" stroke-width="2.5"/>`;
+  x.s.forEach((v,i)=>s+=`<circle cx="${X(12+i)}" cy="${Y(v)}" r="3" fill="${x.col}"><title>${MON[12+i]}: ${inr(v)}</title></circle>`)});
+ for(let i=0;i<n;i+=(n>18?3:2))s+=`<text x="${X(i)}" y="${Ht-B+16}" font-size="10" fill="var(--mut)" text-anchor="middle">${MON[i]}</text>`;
+ $("chart").innerHTML=s;
+ $("leg").innerHTML=`<span><i style="background:var(--ink)"></i>Actual</span>`+sets.map(x=>`<span><i style="background:${x.col}"></i>${x.name}</span>`).join("")+(m!=="trad"?`<span><i style="background:var(--shade);height:8px"></i>95% prediction interval</span>`:"");
+ // table
+ let t=`<thead><tr><th>Month</th>`;
+ sets.forEach(x=>t+=`<th>${x.k==="ai"?"AI":"Trad."} sales</th><th>${x.k==="ai"?"AI":"Trad."} op. profit</th>`);
+ if(m!=="trad")t+=`<th>AI 95% range</th>`;
+ t+=`</tr></thead><tbody>`;
+ for(let i=0;i<h;i++){t+=`<tr><td>${MON[12+i]}</td>`;sets.forEach(x=>t+=`<td>${inr(x.s[i])}</td><td>${inr(cm*x.s[i]-F)}</td>`);
+  if(m!=="trad")t+=`<td>${inr(lo[i]*sh)} – ${inr(hi[i]*sh)}</td>`;t+=`</tr>`}
+ t+=`</tbody><tfoot><tr><td>Total</td>`;
+ sets.forEach(x=>{const tot=x.s.reduce((a,b)=>a+b);t+=`<td>${inr(tot)}</td><td>${inr(cm*tot-F*h)}</td>`});
+ if(m!=="trad")t+=`<td></td>`;
+ t+=`</tr></tfoot>`;
+ $("tbl").innerHTML=t;
+}
+render();
+</script>
+</body>
+</html>
